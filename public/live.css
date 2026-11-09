@@ -1,4 +1,7 @@
 .practice-link {
+  align-items: center;
+  display: inline-flex;
+  min-height: 44px;
   text-decoration: none;
 }
 
@@ -38,6 +41,7 @@
 }
 
 .live-card {
+  min-width: 0;
   padding: clamp(20px, 4vw, 34px);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -133,11 +137,10 @@
 }
 
 .stage-progress {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
   font-weight: 650;
   margin-bottom: 20px;
   color: var(--purple);
@@ -145,7 +148,8 @@
 
 .stage-progress progress {
   accent-color: var(--purple);
-  width: min(32%, 120px);
+  grid-column: 3;
+  width: 120px;
 }
 
 .round-timer {
@@ -169,6 +173,7 @@
 
 .live-options {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -177,20 +182,31 @@
   background: var(--white);
   border: 1px solid var(--line);
   border-radius: 13px;
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 4px 10px;
   min-height: 60px;
+  overflow-wrap: anywhere;
   padding: 10px 12px;
+  position: relative;
 }
 
 label.live-option {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .live-option input {
-  accent-color: var(--purple);
-  flex: none;
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
   margin: 0;
+}
+
+.live-option:has(input:focus-visible) {
+  outline: 2px solid var(--purple);
+  outline-offset: 2px;
 }
 
 .live-option:has(input:checked),
@@ -205,8 +221,7 @@ label.live-option {
 }
 
 .live-option .option-letter {
-  flex: none;
-  min-width: 32px;
+  grid-row: 1 / span 2;
   width: 32px;
   height: 32px;
   display: grid;
@@ -218,11 +233,13 @@ label.live-option {
 
 .answer-tag {
   color: var(--ink);
-  flex: none;
+  grid-column: 2;
   font-size: .8rem;
   font-weight: 700;
-  margin-left: auto;
-  max-width: 28%;
+}
+
+.answer-tag:empty {
+  display: none;
 }
 
 .round-controls,
@@ -280,16 +297,95 @@ label.live-option {
   background: var(--wrong-soft);
 }
 
+@media (min-width: 900px) {
+  .live-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 660px), (max-height: 650px) {
+  .stage-progress:has(.round-timer) {
+    background: var(--white);
+    border-bottom: 1px solid var(--line);
+    padding-block: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  [data-form="answer"] .round-controls {
+    background: var(--white);
+    border-top: 1px solid var(--line);
+    bottom: 0;
+    padding-block: 8px;
+    position: sticky;
+    z-index: 1;
+  }
+
+  .round-hint {
+    scroll-margin-block-end: 70px;
+  }
+}
+
 @media (max-width: 660px) {
+  .header-inner {
+    gap: 10px;
+    min-height: 64px;
+    padding-block: 8px;
+  }
+
+  .brand-icon {
+    flex: none;
+  }
+
   .live-grid {
     grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .live-page {
+    padding: 18px 12px;
   }
 
   .live-hero {
     padding-top: 0;
   }
 
+  .live-card {
+    padding: 16px;
+  }
+
+  .live-card > button {
+    width: 100%;
+  }
+
   .live-actions > button {
-    min-height: 46px;
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+
+  .stage-progress {
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-bottom: 14px;
+  }
+
+  .stage-progress progress {
+    grid-column: 1 / -1;
+    height: 8px;
+    width: 100%;
+  }
+
+  .round-timer {
+    white-space: nowrap;
+  }
+
+  .live-option {
+    line-height: 1.4;
+  }
+
+  .rankings :is(th, td) {
+    font-size: .875rem;
+    padding-inline: 5px;
   }
 }

@@ -150,7 +150,7 @@ function renderProgress(view) {
   return `<div class="stage-progress">
     <span>Pregunta ${view.round + 1} de ${view.totalRounds}</span>
     ${view.endsAt === undefined ? '' : `<span class="round-timer">
-      Tiempo restante <strong id="roundSeconds">${secondsRemaining()} s</strong>
+      Tiempo <strong id="roundSeconds">${secondsRemaining()} s</strong>
     </span>`}
     <progress value="${view.round + 1}" max="${view.totalRounds}" aria-label="Avance de la partida"></progress>
   </div>`;
@@ -234,11 +234,11 @@ function renderRound(view) {
       ${nextButton}
     </div>`;
   } else if (!reveal && view.me.answer === null) {
-    controls = `<div class="live-actions round-controls">
+    controls = `<p id="roundHint" class="round-hint" ${hintOpen ? '' : 'hidden'}>${escapeHtml(view.question.hint)}</p>
+    <div class="live-actions round-controls">
       <button class="primary-button" type="submit" ${selected === null ? 'disabled' : ''}>Confirmar respuesta</button>
       <button class="secondary-button" type="button" data-action="hint" aria-expanded="${hintOpen}" aria-controls="roundHint">Pista</button>
-    </div>
-    <p id="roundHint" class="round-hint" ${hintOpen ? '' : 'hidden'}>${escapeHtml(view.question.hint)}</p>`;
+    </div>`;
   } else {
     let message = 'Respuesta recibida. La solución aparecerá cuando todos respondan o termine el tiempo.';
     if (reveal) {
@@ -323,8 +323,12 @@ function showState(view) {
   else if (view.phase === 'finished') app.innerHTML = renderResults(view);
   else app.innerHTML = renderRound(view);
   updateCountdown();
-  if (transition) main.focus();
-  else if (focusedAction) app.querySelector(`[data-action="${focusedAction}"]`)?.focus({ preventScroll: true });
+  if (transition) {
+    main.focus({ preventScroll: true });
+    main.scrollIntoView({ block: 'start' });
+  } else if (focusedAction) {
+    app.querySelector(`[data-action="${focusedAction}"]`)?.focus({ preventScroll: true });
+  }
 }
 
 async function submit(action, fields, button) {
@@ -419,7 +423,9 @@ app.addEventListener('click', event => {
   if (action === 'hint') {
     hintOpen = !hintOpen;
     button.setAttribute('aria-expanded', String(hintOpen));
-    document.querySelector('#roundHint').hidden = !hintOpen;
+    const hint = document.querySelector('#roundHint');
+    hint.hidden = !hintOpen;
+    if (hintOpen) hint.scrollIntoView({ block: 'nearest' });
   } else if (action === 'copy') {
     copyInvite();
   } else if (action === 'csv') {
