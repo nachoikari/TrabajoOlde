@@ -134,6 +134,7 @@
 
 .stage-progress {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -145,6 +146,20 @@
 .stage-progress progress {
   accent-color: var(--purple);
   width: min(32%, 120px);
+}
+
+.round-timer {
+  background: var(--purple-soft);
+  border-radius: 99px;
+  color: var(--ink);
+  font-size: .875rem;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 10px;
+}
+
+.round-timer-low {
+  background: var(--wrong-soft);
+  color: var(--wrong);
 }
 
 .question-stage h1 {

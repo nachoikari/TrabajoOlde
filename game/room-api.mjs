@@ -4,6 +4,9 @@ import { questions } from './questions.mjs';
 
 const roomLifetime = 8 * 60 * 60 * 1000;
 const maxPlayers = 60;
+const roundDurationMs = 30_000;
+const maxRoundPoints = 1000;
+const minRoundPoints = 100;
 const roomCodePattern = /^\d{6}$/;
 const tokenPattern = /^[a-f0-9]{64}$/;
 
@@ -26,22 +29,36 @@ function json(body, status = 200) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
+function answerChoice(answer) {
+  return typeof answer === 'number' ? answer : answer?.choice;
+}
+
+function answerPoints(round, answer) {
+  if (answer === undefined || answerChoice(answer) !== questions[round].correct) return 0;
+  if (typeof answer === 'number') return 1;
+  const timeLeft = 1 - answer.elapsedMs / roundDurationMs;
+  return Math.round(minRoundPoints + (maxRoundPoints - minRoundPoints) * timeLeft);
+}
+
 function getScore(player, throughRound) {
-  return Object.entries(player.answers).filter(([round, answer]) =>
-    Number(round) <= throughRound && questions[round].correct === answer
-  ).length;
+  return Object.entries(player.answers).reduce((score, [round, answer]) =>
+    Number(round) <= throughRound ? score + answerPoints(round, answer) : score, 0);
 }
 
 function snapshot(room, role, participant) {
   const { code, phase, round, revision, players } = room;
   const question = questions[round];
   const revealing = phase === 'reveal';
+  const timed = room.roundStartedAt !== undefined;
   const throughRound = revealing || phase === 'finished' ? round : round - 1;
   const state = {
     code, phase, revision, role, round,
     totalRounds: questions.length,
+    maxPoints: questions.length * (timed ? maxRoundPoints : 1),
     playerCount: players.length,
   };
+
+  if (phase === 'question' && timed) state.endsAt = room.roundStartedAt + roundDurationMs;
 
   if (phase === 'question' || revealing) {
     const { topic, label, question: prompt, options, hint } = question;
@@ -55,11 +72,13 @@ function snapshot(room, role, participant) {
   }
 
   if (participant) {
+    const answer = participant.answers[round];
     state.me = {
       name: participant.name,
-      answer: participant.answers[round] ?? null,
+      answer: answerChoice(answer) ?? null,
       score: getScore(participant, throughRound),
     };
+    if (revealing) state.me.roundPoints = answerPoints(round, answer);
   }
 
   if (role === 'host' || phase === 'finished') {
@@ -77,7 +96,7 @@ function snapshot(room, role, participant) {
 function optionsCount(players, length, round) {
   const counts = Array(length).fill(0);
   for (const player of players) {
-    const answer = player.answers[round];
+    const answer = answerChoice(player.answers[round]);
     if (answer !== undefined) counts[answer] += 1;
   }
   return counts;
@@ -123,10 +142,11 @@ function advance(room, action) {
   if (action === 'start' && room.phase === 'lobby' && room.players.length > 0) {
     room.phase = 'question';
     room.round = 0;
+    room.roundStartedAt = Date.now();
     return;
   }
 
-  if (action === 'reveal' && room.phase === 'question') {
+  if (action === 'reveal' && room.phase === 'question' && room.roundStartedAt === undefined) {
     room.phase = 'reveal';
     return;
   }
@@ -137,6 +157,7 @@ function advance(room, action) {
     } else {
       room.round += 1;
       room.phase = 'question';
+      if (room.roundStartedAt !== undefined) room.roundStartedAt = Date.now();
     }
     return;
   }
@@ -144,7 +165,15 @@ function advance(room, action) {
   fail(409, 'La partida cambió o todavía no se puede realizar esa acción.');
 }
 
-function applyAction(room, data, tokenHash) {
+function closeExpiredRound(room, now) {
+  if (room.phase !== 'question' || room.roundStartedAt === undefined ||
+      now < room.roundStartedAt + roundDurationMs) return false;
+  room.phase = 'reveal';
+  room.revision += 1;
+  return true;
+}
+
+function applyAction(room, data, tokenHash, receivedAt) {
   const isHost = room.host === tokenHash;
   const role = isHost ? 'host' : 'player';
   let player = room.players.find(candidate => candidate.token === tokenHash);
@@ -152,27 +181,37 @@ function applyAction(room, data, tokenHash) {
 
   if (data.action === 'join') {
     if (isHost) fail(403, 'El anfitrión no ocupa un lugar de jugador.');
-    if (player) return result(false);
+    if (player) return result(closeExpiredRound(room, receivedAt));
     player = addPlayer(room, data, tokenHash);
     room.revision += 1;
     return result(true);
   }
 
   if (!isHost && !player) fail(403, 'Tu sesión no pertenece a esta sala.');
-  if (data.action === 'state') return result(false);
+  if (data.action === 'state') return result(closeExpiredRound(room, receivedAt));
 
   if (data.action === 'answer') {
     if (isHost) fail(403, 'El anfitrión no responde preguntas.');
     if (data.round !== room.round) fail(409, 'Esta pregunta ya cambió.');
-    if (player.answers[room.round] === data.choice && Object.hasOwn(player.answers, room.round)) {
-      return result(false);
+    const previousAnswer = player.answers[room.round];
+    if (previousAnswer !== undefined && answerChoice(previousAnswer) === data.choice) {
+      return result(closeExpiredRound(room, receivedAt));
     }
     if (room.phase !== 'question') fail(409, 'Esta pregunta ya está cerrada.');
+    if (closeExpiredRound(room, receivedAt)) return result(true);
     if (!Number.isInteger(data.choice) || data.choice < 0 || data.choice >= questions[room.round].options.length) {
       fail(400, 'Elegí una opción válida.');
     }
-    if (Object.hasOwn(player.answers, room.round)) fail(409, 'Ya respondiste esta pregunta.');
-    player.answers[room.round] = data.choice;
+    if (previousAnswer !== undefined) fail(409, 'Ya respondiste esta pregunta.');
+    if (room.roundStartedAt === undefined) {
+      player.answers[room.round] = data.choice;
+    } else {
+      const elapsedMs = Math.max(0, receivedAt - room.roundStartedAt);
+      player.answers[room.round] = { choice: data.choice, elapsedMs };
+      if (room.players.every(candidate => Object.hasOwn(candidate.answers, room.round))) {
+        room.phase = 'reveal';
+      }
+    }
   } else if (['start', 'reveal', 'next'].includes(data.action)) {
     if (!isHost) fail(403, 'Solo el anfitrión puede controlar la partida.');
     if (data.round !== room.round) fail(409, 'La partida ya avanzó.');
@@ -186,6 +225,7 @@ function applyAction(room, data, tokenHash) {
 }
 
 async function handleAction(store, hostCode, data) {
+  const receivedAt = Date.now();
   if (!data || typeof data.token !== 'string' || !tokenPattern.test(data.token)) {
     fail(400, 'No se pudo identificar esta sesión.');
   }
@@ -202,8 +242,11 @@ async function handleAction(store, hostCode, data) {
       fail(404, 'La sala no existe o ya venció. Revisá el código.');
     }
 
-    const { changed, view } = applyAction(current.room, data, tokenHash);
-    if (!changed || await store.write(code, current.room, current.version)) return view;
+    const { changed, view } = applyAction(current.room, data, tokenHash, receivedAt);
+    if (!changed || await store.write(code, current.room, current.version)) {
+      if (view.endsAt !== undefined) view.serverNow = Date.now();
+      return view;
+    }
     await wait(randomInt(20, Math.min(400, 55 * (attempt + 1))));
   }
 

@@ -19,10 +19,10 @@ El proyecto usa Netlify Functions y Netlify Blobs del mismo sitio para compartir
 
 1. Abrí el sitio, escribí tu PIN privado y seleccioná **Crear sala**.
 2. Compartí con el grupo el código de seis dígitos o el enlace que genera la sala. Cada participante escribe un nombre o apodo y queda en espera. Compartí únicamente el código de sala.
-3. Seleccioná **Iniciar partida** cuando el grupo esté listo. Vas a poder ver cuántas personas respondieron, cerrar respuestas, mostrar la explicación y pasar a la siguiente pregunta. Si cerrás una pregunta antes de que alguien responda, esa pregunta vale cero para esa persona.
+3. Seleccioná **Iniciar partida** cuando el grupo esté listo. Cada pregunta tiene 30 segundos. La respuesta correcta y su explicación se revelan cuando todos responden o se acaba el tiempo. Después, seleccioná **Siguiente pregunta**.
 4. Después de la última pregunta, seleccioná **Ver resultados**. Podés descargar el CSV con la clasificación, los puntajes y el número de preguntas respondidas.
 
-Cada acierto suma un punto y los puntajes iguales comparten puesto. Las pistas están disponibles durante la pregunta. El modo individual sigue disponible en el sitio y contiene las mismas preguntas y explicaciones, así que el juego está pensado como actividad de clase.
+Cada acierto suma entre 100 y 1000 puntos según el tiempo registrado por el servidor. Las respuestas incorrectas, tardías o en blanco valen cero. Los puntajes iguales comparten puesto. Las pistas están disponibles durante la pregunta. El modo individual sigue disponible en el sitio y contiene las mismas preguntas y explicaciones, así que el juego está pensado como actividad de clase.
 
 Una vez iniciada la partida, se cierra el ingreso de jugadores nuevos. Recargar en la misma pestaña recupera la sesión. Conservá abierta la pestaña del anfitrión hasta descargar los resultados. El acceso a la sala vence ocho horas después de crearla. Los datos se guardan en el almacén `pegasus-live-rooms` del proyecto en Netlify.
 

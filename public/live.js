@@ -15,6 +15,8 @@ let busy = false;
 let pendingJoin;
 let selected = null;
 let hintOpen = false;
+let questionDeadline;
+let countdownInterval;
 
 function loadSession() {
   try {
@@ -70,6 +72,7 @@ function makeToken() {
 function goToLanding() {
   rememberSession(null);
   state = undefined;
+  syncCountdown();
   history.replaceState(null, '', location.pathname);
   renderLanding();
 }
@@ -146,8 +149,48 @@ function renderLobby(view) {
 function renderProgress(view) {
   return `<div class="stage-progress">
     <span>Pregunta ${view.round + 1} de ${view.totalRounds}</span>
+    ${view.endsAt === undefined ? '' : `<span class="round-timer">
+      Tiempo restante <strong id="roundSeconds">${secondsRemaining()} s</strong>
+    </span>`}
     <progress value="${view.round + 1}" max="${view.totalRounds}" aria-label="Avance de la partida"></progress>
   </div>`;
+}
+
+function secondsRemaining() {
+  return Math.max(0, Math.ceil((questionDeadline - performance.now()) / 1000));
+}
+
+function roundExpired() {
+  return questionDeadline !== undefined && secondsRemaining() === 0;
+}
+
+function updateCountdown() {
+  const label = document.querySelector('#roundSeconds');
+  if (!label) return;
+  const seconds = secondsRemaining();
+  const text = `${seconds} s`;
+  if (label.textContent !== text) label.textContent = text;
+  label.parentElement.classList.toggle('round-timer-low', seconds <= 5);
+  if (seconds === 0) {
+    for (const control of app.querySelectorAll('[data-form="answer"] input, [data-form="answer"] button[type="submit"]')) {
+      control.disabled = true;
+    }
+  }
+}
+
+function syncCountdown(view, transition) {
+  if (view?.endsAt === undefined) {
+    questionDeadline = undefined;
+    clearInterval(countdownInterval);
+    countdownInterval = undefined;
+    return;
+  }
+
+  const deadline = performance.now() + Math.max(0, view.endsAt - view.serverNow);
+  questionDeadline = transition || questionDeadline === undefined
+    ? deadline
+    : Math.min(questionDeadline, deadline);
+  countdownInterval ??= setInterval(updateCountdown, 200);
 }
 
 function answerOptions(view) {
@@ -179,11 +222,16 @@ function renderRound(view) {
   let controls = '';
   if (host) {
     const answered = view.players.filter(player => player.answered).length;
+    let nextButton = '';
+    if (reveal) {
+      const label = view.round + 1 === view.totalRounds ? 'Ver resultados' : 'Siguiente pregunta';
+      nextButton = `<button class="primary-button" data-action="next">${label}</button>`;
+    } else if (view.endsAt === undefined) {
+      nextButton = '<button class="primary-button" data-action="reveal">Cerrar respuestas y revelar</button>';
+    }
     controls = `<div class="live-actions round-controls">
       <span class="live-pill">${answered} de ${view.playerCount} respondieron</span>
-      <button class="primary-button" data-action="${reveal ? 'next' : 'reveal'}">${reveal
-        ? (view.round + 1 === view.totalRounds ? 'Ver resultados' : 'Siguiente pregunta')
-        : 'Cerrar respuestas y revelar'}</button>
+      ${nextButton}
     </div>`;
   } else if (!reveal && view.me.answer === null) {
     controls = `<div class="live-actions round-controls">
@@ -192,9 +240,13 @@ function renderRound(view) {
     </div>
     <p id="roundHint" class="round-hint" ${hintOpen ? '' : 'hidden'}>${escapeHtml(view.question.hint)}</p>`;
   } else {
-    const message = reveal
-      ? 'Esperá a que el anfitrión avance.'
-      : 'Respuesta recibida. Esperá a que el anfitrión revele la solución.';
+    let message = 'Respuesta recibida. La solución aparecerá cuando todos respondan o termine el tiempo.';
+    if (reveal) {
+      const points = view.me.roundPoints ?? Number(view.me.answer === reveal.correct);
+      message = `+${points} puntos en esta pregunta. Esperá a que el anfitrión avance.`;
+    } else if (view.endsAt === undefined) {
+      message = 'Respuesta recibida. Esperá a que el anfitrión revele la solución.';
+    }
     controls = `<p class="round-wait">${message}</p>`;
   }
 
@@ -228,14 +280,18 @@ function rankings(players) {
 
 function renderResults(view) {
   const standings = rankings(view.players);
+  const maxPoints = view.maxPoints ?? view.totalRounds;
+  const rules = maxPoints === view.totalRounds
+    ? 'Cada respuesta correcta suma un punto.'
+    : 'Las respuestas correctas más rápidas suman más puntos.';
   return `<section class="live-card live-stage">
     <div class="eyebrow">Sala ${view.code} · Partida finalizada</div>
     <h1>Resultados de la partida</h1>
-    <p>${view.me ? `Obtuviste <strong>${view.me.score} de ${view.totalRounds}</strong> puntos.` : 'Cada respuesta correcta suma un punto.'}</p>
+    <p>${view.me ? `Obtuviste <strong>${view.me.score} de ${maxPoints}</strong> puntos.` : rules}</p>
     <table class="rankings">
       <thead><tr><th scope="col">Puesto</th><th scope="col">Participante</th><th scope="col">Puntos</th></tr></thead>
       <tbody>${standings.map(player => `<tr>
-        <td>${player.rank}</td><th scope="row">${escapeHtml(player.name)}</th><td>${player.score} / ${view.totalRounds}</td>
+        <td>${player.rank}</td><th scope="row">${escapeHtml(player.name)}</th><td>${player.score} / ${maxPoints}</td>
       </tr>`).join('')}</tbody>
     </table>
     <aside class="round-explanation">
@@ -256,6 +312,7 @@ function showState(view) {
     ? view.revision !== state.revision
     : view.me?.answer !== state.me?.answer || (view.phase === 'lobby' && view.playerCount !== state.playerCount));
   state = view;
+  syncCountdown(view, transition);
   if (!visibleChange) return;
   const focusedAction = app.contains(document.activeElement) ? document.activeElement.dataset.action : null;
   if (transition) {
@@ -265,6 +322,7 @@ function showState(view) {
   if (view.phase === 'lobby') app.innerHTML = renderLobby(view);
   else if (view.phase === 'finished') app.innerHTML = renderResults(view);
   else app.innerHTML = renderRound(view);
+  updateCountdown();
   if (transition) main.focus();
   else if (focusedAction) app.querySelector(`[data-action="${focusedAction}"]`)?.focus({ preventScroll: true });
 }
@@ -300,7 +358,7 @@ async function submit(action, fields, button) {
     }
   } finally {
     busy = false;
-    if (button?.isConnected) button.disabled = false;
+    if (button?.isConnected) button.disabled = action === 'answer' && roundExpired();
   }
 }
 
@@ -310,9 +368,9 @@ function downloadCsv() {
     const escaped = /^[=+@-]/.test(text) ? "'" + text : text;
     return '"' + escaped.replaceAll('"', '""') + '"';
   };
-  const lines = [['Puesto', 'Participante', 'Puntos', 'Preguntas respondidas', 'Total de preguntas']];
+  const lines = [['Puesto', 'Participante', 'Puntos', 'Preguntas respondidas', 'Total de preguntas', 'Puntaje máximo']];
   for (const player of rankings(state.players)) {
-    lines.push([player.rank, player.name, player.score, player.totalAnswered, state.totalRounds]);
+    lines.push([player.rank, player.name, player.score, player.totalAnswered, state.totalRounds, state.maxPoints ?? state.totalRounds]);
   }
   const data = lines.map(line => line.map(cell).join(',')).join('\r\n');
   const url = URL.createObjectURL(new Blob(['\uFEFF', data], { type: 'text/csv;charset=utf-8' }));
@@ -341,7 +399,7 @@ app.addEventListener('submit', event => {
   event.preventDefault();
   const fields = Object.fromEntries(new FormData(form));
   if (action === 'answer') {
-    if (selected !== null) submit(action, { round: state.round, choice: selected }, submitter);
+    if (selected !== null && !roundExpired()) submit(action, { round: state.round, choice: selected }, submitter);
   } else {
     submit(action, fields, submitter);
   }
@@ -350,7 +408,7 @@ app.addEventListener('submit', event => {
 app.addEventListener('change', event => {
   if (event.target.name === 'choice') {
     selected = Number(event.target.value);
-    if (!busy) event.target.form.querySelector('button[type="submit"]').disabled = false;
+    if (!busy && !roundExpired()) event.target.form.querySelector('button[type="submit"]').disabled = false;
   }
 });
 
@@ -398,7 +456,7 @@ async function poll() {
     }
   }
 
-  const delay = document.hidden ? 10000 : 2500 + Math.random() * 1500;
+  const delay = document.hidden ? 10000 : 1000 + Math.random() * 650;
   setTimeout(poll, delay);
 }
 
